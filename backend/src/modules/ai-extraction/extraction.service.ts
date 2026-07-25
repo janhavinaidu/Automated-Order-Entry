@@ -375,13 +375,44 @@ export const runExtractionPipeline = async (emailId: string): Promise<void> => {
 
       try {
         if (category === 'pdf') {
-          const text = await extractTextFromPDF(filePath);
-          if (text.trim().length > 20) {
+          const pdfResult = await extractTextFromPDF(filePath);
+          
+          if (pdfResult.text.trim().length > 20) {
+            // PDF has extractable text → use text model
+            logger.info(
+              `[Extraction] PDF "${filename}": ${pdfResult.pageCount} pages, ${pdfResult.text.length} chars, ` +
+              `isScanned=${pdfResult.isScanned}, confidence=${pdfResult.confidence}`,
+            );
             candidateResults.push({
-              result: await extractOrderFromText(text, `PDF: ${filename}`),
+              result: await extractOrderFromText(pdfResult.text, `PDF: ${filename}`),
               source: `attachment:pdf:${filename}`,
               modelUsed: AI_MODELS.TEXT,
             });
+          } else if (pdfResult.isScanned || pdfResult.pageCount > 0) {
+            // PDF is scanned/image-based → fallback to Vision API
+            logger.info(
+              `[Extraction] PDF "${filename}" detected as SCANNED (${pdfResult.pageCount} pages, ` +
+              `${pdfResult.text.length} chars). Using Vision API for OCR...`,
+            );
+            try {
+              const { base64, mimeType } = encodeImageToBase64(filePath);
+              const visionResult = await extractOrderFromImage(base64, mimeType);
+              candidateResults.push({
+                result: visionResult,
+                source: `attachment:pdf-scanned:${filename}`,
+                modelUsed: AI_MODELS.VISION,
+              });
+            } catch (visionErr) {
+              logger.warn(
+                `[Extraction] Vision API failed for scanned PDF "${filename}": ` +
+                `${visionErr instanceof Error ? visionErr.message : String(visionErr)}`,
+              );
+            }
+          } else {
+            logger.warn(
+              `[Extraction] PDF "${filename}" yielded no extractable content ` +
+              `(${pdfResult.text.length} chars, scanned=${pdfResult.isScanned})`,
+            );
           }
         } else if (category === 'excel') {
           const text = extractTextFromExcel(filePath);

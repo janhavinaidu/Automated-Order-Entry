@@ -5,7 +5,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   FileText, TableProperties, Image as LucideImage, AlertTriangle, CheckCircle,
   Info, Zap, User, Package, TrendingUp, Clock,
-  AlertCircle, Sparkles
+  AlertCircle, Sparkles, RefreshCw
 } from 'lucide-react';
 import { api } from '../lib/api';
 import type { ApiResponse } from '../lib/api';
@@ -142,8 +142,10 @@ export default function EmailDetail() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [showAI, setShowAI] = useState(false);
   const [orderGenerated, setOrderGenerated] = useState(false);
+  const [pollInterval, setPollInterval] = useState<ReturnType<typeof setInterval> | null>(null);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  const { data: emailData, isLoading } = useQuery({
+  const { data: emailData, isLoading, refetch: refetchEmail } = useQuery({
     queryKey: ['email', id],
     queryFn: () => api.get<ApiResponse<Email>>(`/emails/${id}`),
     enabled: !!id,
@@ -155,19 +157,58 @@ export default function EmailDetail() {
   });
 
   const extractMutation = useMutation({
-    mutationFn: () => api.post(`/emails/${id}/process`, {}),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['email', id] });
-      setIsProcessing(false);
-      setShowAI(true);
+    mutationFn: async () => {
+      console.log(`[DEBUG] Triggering extraction for email: ${id}`);
+      const result = await api.post(`/emails/${id}/process`, {});
+      console.log('[DEBUG] Extraction triggered successfully:', result);
+      return result;
     },
-    onError: () => {
+    onSuccess: () => {
+      console.log('[DEBUG] Extraction mutation succeeded, starting polling...');
+      setErrorMsg(null);
+      setIsProcessing(true);
+      setShowAI(false);
+      
+      // Start polling for extraction completion
+      let pollCount = 0;
+      const interval = setInterval(async () => {
+        pollCount++;
+        try {
+          const result = await refetchEmail();
+          const extractionStatus = result.data?.data?.extractionJob?.status;
+          console.log(`[DEBUG] Poll #${pollCount}: Extraction status = ${extractionStatus}`);
+          
+          if (extractionStatus === 'COMPLETED' || extractionStatus === 'FAILED') {
+            console.log(`[DEBUG] Extraction finished with status: ${extractionStatus}`);
+            clearInterval(interval);
+            setPollInterval(null);
+            setIsProcessing(false);
+            setShowAI(true);
+          }
+        } catch (err) {
+          console.error('[DEBUG] Poll error:', err);
+        }
+      }, 1000); // Poll every 1 second
+      setPollInterval(interval);
+    },
+    onError: (error: Error) => {
+      console.error('[DEBUG] Extraction mutation failed:', error);
+      setErrorMsg(error.message || 'Failed to trigger extraction');
       setIsProcessing(false);
-      setShowAI(true);
+      setShowAI(false);
     },
   });
 
   const email = emailData?.data;
+
+  // Cleanup polling interval on unmount
+  useEffect(() => {
+    return () => {
+      if (pollInterval) {
+        clearInterval(pollInterval);
+      }
+    };
+  }, [pollInterval]);
 
   // Mark as read when opened
   useEffect(() => {
@@ -177,8 +218,11 @@ export default function EmailDetail() {
   }, [email?.id]);
 
   const handleExtract = () => {
-    setIsProcessing(true);
-    setShowAI(false);
+    // Stop any existing polling
+    if (pollInterval) {
+      clearInterval(pollInterval);
+      setPollInterval(null);
+    }
     extractMutation.mutate();
   };
 
@@ -209,6 +253,46 @@ export default function EmailDetail() {
 
   return (
     <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} transition={{ duration: 0.3 }}>
+      {/* Error Banner */}
+      <AnimatePresence>
+        {errorMsg && (
+          <motion.div
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            style={{
+              background: 'var(--red-dim)',
+              border: '1px solid var(--red-500)',
+              borderRadius: 12,
+              padding: '12px 16px',
+              marginBottom: 16,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 10,
+            }}
+          >
+            <AlertTriangle size={16} color="var(--red-400)" />
+            <div>
+              <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--red-400)' }}>Error: {errorMsg}</span>
+              <div style={{ fontSize: 11, color: 'var(--red-300)', marginTop: 4 }}>Check browser console (F12) for details</div>
+            </div>
+            <button
+              onClick={() => setErrorMsg(null)}
+              style={{
+                marginLeft: 'auto',
+                background: 'none',
+                border: 'none',
+                cursor: 'pointer',
+                color: 'var(--red-400)',
+                fontSize: 18,
+              }}
+            >
+              ✕
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Email Meta */}
       <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)', borderRadius: 16, padding: 20, marginBottom: 16 }}>
         <div style={{ marginBottom: 14 }}>
@@ -231,10 +315,46 @@ export default function EmailDetail() {
         </div>
       </div>
 
-      {/* Attachments */}
+      {/* Attachments - with refresh button */}
       {email.hasAttachments && email.attachments && email.attachments.length > 0 && (
         <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)', borderRadius: 16, padding: 18, marginBottom: 16 }}>
-          <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 12 }}>Attachments ({email.attachments.length})</div>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+            <div style={{ fontSize: 13, fontWeight: 600 }}>Attachments ({email.attachments.length})</div>
+            {(email.extractionJob?.status === 'COMPLETED' || email.extractionJob?.status === 'FAILED') && (
+              <motion.button
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+                onClick={handleExtract}
+                disabled={extractMutation.isPending || isProcessing}
+                title="Re-parse attachments"
+                style={{
+                  padding: '6px 12px',
+                  borderRadius: 6,
+                  background: 'rgba(168,85,247,0.1)',
+                  border: '1px solid rgba(168,85,247,0.3)',
+                  cursor: extractMutation.isPending || isProcessing ? 'not-allowed' : 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 6,
+                  transition: 'all 0.2s',
+                  opacity: extractMutation.isPending || isProcessing ? 0.6 : 1,
+                }}
+              >
+                <motion.div
+                  animate={extractMutation.isPending || isProcessing ? { rotate: 360 } : { rotate: 0 }}
+                  transition={{
+                    duration: extractMutation.isPending || isProcessing ? 1 : 0,
+                    repeat: extractMutation.isPending || isProcessing ? Infinity : 0,
+                    ease: 'linear',
+                  }}
+                >
+                  <RefreshCw size={12} color="var(--purple-400)" />
+                </motion.div>
+                <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--purple-400)' }}>Reparse</span>
+              </motion.button>
+            )}
+          </div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
             {email.attachments.map(att => (
               <AttachmentPill 
@@ -291,12 +411,48 @@ export default function EmailDetail() {
           <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }}>
             {/* AI Summary */}
             <div style={{ background: 'var(--bg-surface)', border: '1px solid rgba(168,85,247,0.2)', borderRadius: 16, padding: 18, marginBottom: 14 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
-                <div style={{ width: 30, height: 30, background: 'var(--purple-dim)', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <Sparkles size={15} color="var(--purple-400)" />
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14, justifyContent: 'space-between' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <div style={{ width: 30, height: 30, background: 'var(--purple-dim)', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <Sparkles size={15} color="var(--purple-400)" />
+                  </div>
+                  <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)' }}>AI Summary</span>
+                  <span style={{ fontSize: 10, fontWeight: 600, background: 'var(--purple-dim)', color: 'var(--purple-400)', padding: '3px 8px', borderRadius: 6 }}>AI Generated</span>
                 </div>
-                <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)' }}>AI Summary</span>
-                <span style={{ marginLeft: 'auto', fontSize: 10, fontWeight: 600, background: 'var(--purple-dim)', color: 'var(--purple-400)', padding: '3px 8px', borderRadius: 6 }}>AI Generated</span>
+                <motion.button
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
+                  onClick={handleExtract}
+                  disabled={extractMutation.isPending || isProcessing}
+                  title="Re-parse this email"
+                  style={{
+                    width: 32,
+                    height: 32,
+                    borderRadius: 8,
+                    background: 'var(--purple-dim)',
+                    border: '1px solid rgba(168,85,247,0.3)',
+                    cursor: extractMutation.isPending || isProcessing ? 'not-allowed' : 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    transition: 'all 0.2s',
+                    opacity: extractMutation.isPending || isProcessing ? 0.6 : 1,
+                  }}
+                >
+                  <motion.div
+                    animate={extractMutation.isPending || isProcessing ? { rotate: 360 } : { rotate: 0 }}
+                    transition={{
+                      duration: extractMutation.isPending || isProcessing ? 1 : 0,
+                      repeat: extractMutation.isPending || isProcessing ? Infinity : 0,
+                      ease: 'linear',
+                    }}
+                  >
+                    <RefreshCw
+                      size={16}
+                      color={extractMutation.isPending || isProcessing ? 'var(--purple-300)' : 'var(--purple-400)'}
+                    />
+                  </motion.div>
+                </motion.button>
               </div>
               <p style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.6, marginBottom: 14 }}>{summary}</p>
               

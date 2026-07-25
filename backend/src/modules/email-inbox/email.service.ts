@@ -156,9 +156,10 @@ export const triggerExtraction = async (emailId: string) => {
     throw new NotFoundError('Email');
   }
 
-  if (email.status !== 'PENDING' && email.status !== 'FAILED') {
+  // Allow re-parsing of PENDING, FAILED, and PROCESSED (completed) emails
+  if (email.status !== 'PENDING' && email.status !== 'FAILED' && email.status !== 'PROCESSED') {
     throw new BadRequestError(
-      `Cannot trigger extraction for email with status '${email.status}'. Only PENDING or FAILED emails can be processed.`,
+      `Cannot trigger extraction for email with status '${email.status}'. Only PENDING, FAILED, or PROCESSED emails can be re-parsed.`,
     );
   }
 
@@ -171,7 +172,7 @@ export const triggerExtraction = async (emailId: string) => {
   let extractionJob;
 
   if (email.extractionJob) {
-    // Reset existing job to QUEUED
+    // Reset existing job to QUEUED (allows re-parsing)
     extractionJob = await prisma.aIExtractionJob.update({
       where: { id: email.extractionJob.id },
       data: {
