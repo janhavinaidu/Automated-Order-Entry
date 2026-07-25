@@ -1,0 +1,141 @@
+{
+  "client": "Thunder Client",
+  "collectionName": "OrderPilot AI",
+  "dateExported": "2026-07-09T09:59:00.000Z",
+  "version": "1.1",
+  "folders": [
+    {
+      "name": "Auth & Users",
+      "containerId": ""
+    },
+    {
+      "name": "Customers",
+      "containerId": ""
+    },
+    {
+      "name": "Emails & AI Extraction",
+      "containerId": ""
+    },
+    {
+      "name": "Orders",
+      "containerId": ""
+    },
+    {
+      "name": "Inventory",
+      "containerId": ""
+    },
+    {
+      "name": "Dashboard & KPIs",
+      "containerId": ""
+    }
+  ],
+  "requests": [
+    {
+      "name": "Login (Admin)",
+      "url": "http://localhost:3001/api/v1/auth/login",
+      "method": "POST",
+      "sortNum": 10000,
+      "folderId": "Auth & Users",
+      "headers": [],
+      "body": {
+        "type": "json",
+        "raw": "{\n  \"email\": \"admin@orderpilot.ai\",\n  \"password\": \"Admin@123\"\n}"
+      }
+    },
+    {
+      "name": "Get Profile",
+      "url": "http://localhost:3001/api/v1/auth/profile",
+      "method": "GET",
+      "sortNum": 20000,
+      "folderId": "Auth & Users",
+      "headers": [
+        {
+          "name": "Authorization",
+          "value": "Bearer {{accessToken}}"
+        }
+      ]
+    },
+    {
+      "name": "List Customers",
+      "url": "http://localhost:3001/api/v1/customers?page=1&limit=10",
+      "method": "GET",
+      "sortNum": 30000,
+      "folderId": "Customers",
+      "headers": [
+        {
+          "name": "Authorization",
+          "value": "Bearer {{accessToken}}"
+        }
+      ]
+    },
+    {
+      "name": "Create Customer",
+      "url": "http://localhost:3001/api/v1/customers",
+      "method": "POST",
+      "sortNum": 40000,
+      "folderId": "Customers",
+      "headers": [
+        {
+          "name": "Authorization",
+          "value": "Bearer {{accessToken}}"
+        }
+      ],
+      "body": {
+        "type": "json",
+        "raw": "{\n  \"name\": \"John Doe\",\n  \"company\": \"Apex Tools\",\n  \"email\": \"procurement@apextools.com\",\n  \"phone\": \"+91-9988776655\",\n  \"address\": \"102 Main Street\",\n  \"city\": \"Bengaluru\",\n  \"state\": \"Karnataka\",\n  \"pincode\": \"560002\"\n}"
+      }
+    },
+    {
+      "name": "Dashboard KPIs",
+      "url": "http://localhost:3001/api/v1/dashboard/kpis",
+      "method": "GET",
+      "sortNum": 50000,
+      "folderId": "Dashboard & KPIs",
+      "headers": [
+        {
+          "name": "Authorization",
+          "value": "Bearer {{accessToken}}"
+        }
+      ]
+    },
+    {
+      "name": "List Orders",
+      "url": "http://localhost:3001/api/v1/orders?page=1&limit=5",
+      "method": "GET",
+      "sortNum": 60000,
+      "folderId": "Orders",
+      "headers": [
+        {
+          "name": "Authorization",
+          "value": "Bearer {{accessToken}}"
+        }
+      ]
+    },
+    {
+      "name": "List Inventory",
+      "url": "http://localhost:3001/api/v1/inventory?page=1&limit=10",
+      "method": "GET",
+      "sortNum": 70000,
+      "folderId": "Inventory",
+      "headers": [
+        {
+          "name": "Authorization",
+          "value": "Bearer {{accessToken}}"
+        }
+      ]
+    },
+    {
+      "name": "List Emails",
+      "url": "http://localhost:3001/api/v1/emails?page=1&limit=5",
+      "method": "GET",
+      "sortNum": 80000,
+      "folderId": "Emails & AI Extraction",
+      "headers": [
+        {
+          "name": "Authorization",
+          "value": "Bearer {{accessToken}}"
+        }
+      ]
+    }
+  ]
+}

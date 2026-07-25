@@ -1,0 +1,428 @@
+// This is the Prisma schema for OrderPilot AI
+// Run: npx prisma migrate dev --name init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Enums ────────────────────────────────────────────────────────────────────
+
+enum UserRole {
+  ADMIN
+  INVENTORY
+  VIEWER
+}
+
+enum EmailStatus {
+  PENDING
+  PROCESSING
+  PROCESSED
+  FAILED
+}
+
+enum ExtractionStatus {
+  QUEUED
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+enum OrderStatus {
+  PENDING
+  PROCESSING
+  APPROVED
+  MANUFACTURING
+  INVOICED
+  DISPATCHED
+  DELIVERED
+  REJECTED
+}
+
+enum Priority {
+  URGENT
+  HIGH
+  MEDIUM
+  LOW
+}
+
+enum InventoryStatus {
+  HEALTHY
+  LOW
+  CRITICAL
+}
+
+enum OrderItemInventoryStatus {
+  AVAILABLE
+  PARTIAL
+  UNAVAILABLE
+}
+
+enum ManufacturingJobStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum InvoiceStatus {
+  DRAFT
+  SENT
+  PAID
+  OVERDUE
+  CANCELLED
+}
+
+enum ShipmentStatus {
+  PENDING
+  IN_TRANSIT
+  DELIVERED
+  RETURNED
+}
+
+enum TimelineStepStatus {
+  COMPLETED
+  ACTIVE
+  PENDING
+}
+
+enum NotificationType {
+  ORDER
+  INVENTORY
+  AI
+  DISPATCH
+  INVOICE
+}
+
+// ─── Models ───────────────────────────────────────────────────────────────────
+
+model User {
+  id             String   @id @default(uuid())
+  email          String   @unique
+  name           String
+  role           UserRole @default(INVENTORY)
+  passwordHash   String   @map("password_hash")
+  avatarInitials String?  @map("avatar_initials")
+  isActive       Boolean  @default(true) @map("is_active")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  refreshTokens RefreshToken[]
+  ordersCreated Order[]        @relation("OrderCreatedBy")
+  notifications Notification[]
+
+  @@map("users")
+}
+
+model RefreshToken {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  tokenHash String   @map("token_hash")
+  expiresAt DateTime @map("expires_at")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([tokenHash])
+  @@map("refresh_tokens")
+}
+
+model Customer {
+  id           String   @id @default(uuid())
+  name         String
+  company      String
+  email        String   @unique
+  phone        String?
+  address      String?
+  city         String?
+  state        String?
+  pincode      String?
+  paymentTerms String?  @map("payment_terms")
+  contractRef  String?  @map("contract_ref")
+  avatar       String?
+  notes        String?
+  isActive     Boolean  @default(true) @map("is_active")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  emails Email[]
+  orders Order[]
+
+  @@index([email])
+  @@index([company])
+  @@map("customers")
+}
+
+model Email {
+  id             String      @id @default(uuid())
+  fromEmail      String      @map("from_email")
+  fromName       String?     @map("from_name")
+  company        String?
+  avatar         String?
+  subject        String
+  preview        String?
+  body           String      @db.Text
+  receivedAt     DateTime    @map("received_at")
+  isRead         Boolean     @default(false) @map("is_read")
+  hasAttachments Boolean     @default(false) @map("has_attachments")
+  status         EmailStatus @default(PENDING)
+  customerId     String?     @map("customer_id")
+  messageId      String?     @unique @map("message_id")
+  createdAt      DateTime    @default(now()) @map("created_at")
+  updatedAt      DateTime    @updatedAt @map("updated_at")
+
+  customer      Customer?        @relation(fields: [customerId], references: [id])
+  attachments   Attachment[]
+  extractionJob AIExtractionJob?
+  orders        Order[]
+
+  @@index([status])
+  @@index([customerId])
+  @@index([receivedAt(sort: Desc)])
+  @@map("emails")
+}
+
+model Attachment {
+  id            String   @id @default(uuid())
+  emailId       String   @map("email_id")
+  filename      String
+  fileType      String   @map("file_type")
+  fileSizeBytes Int      @map("file_size_bytes")
+  storagePath   String   @map("storage_path")
+  mimeType      String?  @map("mime_type")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  email Email @relation(fields: [emailId], references: [id], onDelete: Cascade)
+
+  @@index([emailId])
+  @@map("attachments")
+}
+
+model AIExtractionJob {
+  id              String           @id @default(uuid())
+  emailId         String           @unique @map("email_id")
+  status          ExtractionStatus @default(QUEUED)
+  confidence      Float?
+  customerName    String?          @map("customer_name")
+  deliveryDate    String?          @map("delivery_date")
+  priority        Priority?
+  summary         String?          @db.Text
+  rawResponse     Json?            @map("raw_response")
+  errorMessage    String?          @map("error_message") @db.Text
+  modelUsed       String?          @map("model_used")
+  startedAt       DateTime?        @map("started_at")
+  completedAt     DateTime?        @map("completed_at")
+  createdAt       DateTime         @default(now()) @map("created_at")
+
+  email             Email              @relation(fields: [emailId], references: [id], onDelete: Cascade)
+  extractedProducts ExtractedProduct[]
+  validationResult  ValidationResult?
+
+  @@index([status])
+  @@map("ai_extraction_jobs")
+}
+
+model ExtractedProduct {
+  id         String   @id @default(uuid())
+  jobId      String   @map("job_id")
+  name       String
+  sku        String
+  quantity   Int
+  unitPrice  Float    @map("unit_price")
+  confidence Float?
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  job AIExtractionJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@index([jobId])
+  @@map("extracted_products")
+}
+
+model ValidationResult {
+  id            String   @id @default(uuid())
+  jobId         String   @unique @map("job_id")
+  overallStatus String   @map("overall_status")
+  issues        Json
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  job AIExtractionJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@map("validation_results")
+}
+
+model Order {
+  id           String      @id @default(uuid())
+  orderNumber  String      @unique @map("order_number")
+  customerId   String      @map("customer_id")
+  emailId      String?     @map("email_id")
+  status       OrderStatus @default(PENDING)
+  amount       Float       @default(0)
+  currency     String      @default("INR")
+  deliveryDate DateTime?   @map("delivery_date")
+  priority     Priority    @default(MEDIUM)
+  notes        String?     @db.Text
+  progress     Int         @default(0)
+  createdById  String?     @map("created_by_id")
+  createdAt    DateTime    @default(now()) @map("created_at")
+  updatedAt    DateTime    @updatedAt @map("updated_at")
+
+  customer          Customer           @relation(fields: [customerId], references: [id])
+  email             Email?             @relation(fields: [emailId], references: [id])
+  createdBy         User?              @relation("OrderCreatedBy", fields: [createdById], references: [id])
+  items             OrderItem[]
+  timeline          OrderTimeline[]
+  invoice           Invoice?
+  shipment          Shipment?
+  manufacturingJobs ManufacturingJob[]
+
+  @@index([status])
+  @@index([customerId])
+  @@index([createdAt(sort: Desc)])
+  @@map("orders")
+}
+
+model OrderItem {
+  id              String                   @id @default(uuid())
+  orderId         String                   @map("order_id")
+  inventoryItemId String?                  @map("inventory_item_id")
+  name            String
+  sku             String
+  quantity        Int
+  unitPrice       Float                    @map("unit_price")
+  total           Float
+  inventoryStatus OrderItemInventoryStatus  @default(AVAILABLE) @map("inventory_status")
+  availableQty    Int                      @default(0) @map("available_qty")
+  createdAt       DateTime                 @default(now()) @map("created_at")
+
+  order             Order            @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  inventoryItem     InventoryItem?   @relation(fields: [inventoryItemId], references: [id])
+  manufacturingJobs ManufacturingJob[]
+
+  @@index([orderId])
+  @@map("order_items")
+}
+
+model OrderTimeline {
+  id        String             @id @default(uuid())
+  orderId   String             @map("order_id")
+  step      String
+  label     String
+  status    TimelineStepStatus @default(PENDING)
+  timestamp DateTime?
+  note      String?
+  createdAt DateTime           @default(now()) @map("created_at")
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
+  @@map("order_timeline")
+}
+
+model InventoryItem {
+  id           String          @id @default(uuid())
+  name         String
+  sku          String          @unique
+  category     String
+  totalQty     Int             @default(0) @map("total_qty")
+  availableQty Int             @default(0) @map("available_qty")
+  reservedQty  Int             @default(0) @map("reserved_qty")
+  reorderLevel Int             @default(0) @map("reorder_level")
+  unit         String          @default("units")
+  status       InventoryStatus @default(HEALTHY)
+  createdAt    DateTime        @default(now()) @map("created_at")
+  updatedAt    DateTime        @updatedAt @map("updated_at")
+
+  orderItems OrderItem[]
+
+  @@index([sku])
+  @@index([status])
+  @@map("inventory_items")
+}
+
+model ManufacturingJob {
+  id                  String                 @id @default(uuid())
+  orderId             String                 @map("order_id")
+  orderItemId         String?                @map("order_item_id")
+  description         String
+  quantityRequired    Int                    @map("quantity_required")
+  quantityCompleted   Int                    @default(0) @map("quantity_completed")
+  status              ManufacturingJobStatus @default(PENDING)
+  estimatedCompletion DateTime?              @map("estimated_completion")
+  startedAt           DateTime?              @map("started_at")
+  completedAt         DateTime?              @map("completed_at")
+  notes               String?                @db.Text
+  createdAt           DateTime               @default(now()) @map("created_at")
+  updatedAt           DateTime               @updatedAt @map("updated_at")
+
+  order     Order      @relation(fields: [orderId], references: [id])
+  orderItem OrderItem? @relation(fields: [orderItemId], references: [id])
+
+  @@index([orderId])
+  @@index([status])
+  @@map("manufacturing_jobs")
+}
+
+model Invoice {
+  id            String        @id @default(uuid())
+  orderId       String        @unique @map("order_id")
+  invoiceNumber String        @unique @map("invoice_number")
+  amount        Float
+  taxRate       Float         @default(18) @map("tax_rate")
+  taxAmount     Float         @map("tax_amount")
+  totalAmount   Float         @map("total_amount")
+  dueDate       DateTime      @map("due_date")
+  status        InvoiceStatus @default(DRAFT)
+  pdfPath       String?       @map("pdf_path")
+  sentAt        DateTime?     @map("sent_at")
+  paidAt        DateTime?     @map("paid_at")
+  notes         String?       @db.Text
+  createdAt     DateTime      @default(now()) @map("created_at")
+  updatedAt     DateTime      @updatedAt @map("updated_at")
+
+  order Order @relation(fields: [orderId], references: [id])
+
+  @@map("invoices")
+}
+
+model Shipment {
+  id              String         @id @default(uuid())
+  orderId         String         @unique @map("order_id")
+  carrier         String?
+  awbNumber       String?        @map("awb_number")
+  status          ShipmentStatus @default(PENDING)
+  shippingAddress String?        @map("shipping_address") @db.Text
+  trackingUrl     String?        @map("tracking_url")
+  dispatchedAt    DateTime?      @map("dispatched_at")
+  deliveredAt     DateTime?      @map("delivered_at")
+  notes           String?        @db.Text
+  createdAt       DateTime       @default(now()) @map("created_at")
+  updatedAt       DateTime       @updatedAt @map("updated_at")
+
+  order Order @relation(fields: [orderId], references: [id])
+
+  @@map("shipments")
+}
+
+model Notification {
+  id        String           @id @default(uuid())
+  userId    String?          @map("user_id")
+  type      NotificationType
+  title     String
+  message   String
+  isRead    Boolean          @default(false) @map("is_read")
+  metadata  Json?
+  createdAt DateTime         @default(now()) @map("created_at")
+
+  user User? @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([isRead])
+  @@index([createdAt(sort: Desc)])
+  @@map("notifications")
+}

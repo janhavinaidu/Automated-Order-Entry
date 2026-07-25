@@ -1,0 +1,10 @@
+node_modules/
+dist/
+.env
+.env.example
+uploads/
+*.log
+logs/
+coverage/
+.nyc_output/
+prisma/migrations/
